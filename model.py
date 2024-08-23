@@ -119,9 +119,37 @@ class TabR(nn.Module):
         )
 
     def forward(self, x, candidate_x, candidate_labels):
-        # (implementation same as before)
-        # ...
+        # Encode input and candidates
+        x_encoded = self.encoder(x)
+        candidates_encoded = self.encoder(candidate_x)
 
+        # Compute keys
+        x_key = self.key_transform(x_encoded)
+        candidate_keys = self.key_transform(candidates_encoded)
+
+        # Compute similarities
+        similarities = -torch.cdist(x_key.unsqueeze(1), candidate_keys, p=2).squeeze(1)
+
+        # Get top-k context
+        _, top_k_indices = similarities.topk(self.context_size, dim=1)
+        
+        # Compute values
+        candidate_values = self.value_transform(candidates_encoded)
+        label_embeddings = self.label_embedding(candidate_labels)
+        
+        context_keys = torch.gather(candidate_keys, 1, top_k_indices.unsqueeze(-1).expand(-1, -1, self.hidden_dim))
+        context_values = torch.gather(candidate_values, 1, top_k_indices.unsqueeze(-1).expand(-1, -1, self.hidden_dim))
+        context_labels = torch.gather(label_embeddings, 1, top_k_indices.unsqueeze(-1).expand(-1, -1, self.hidden_dim))
+        
+        # Compute attention weights
+        attention_weights = F.softmax(similarities, dim=1)
+        
+        # Compute context vector
+        context_vector = torch.sum(attention_weights.unsqueeze(-1) * (context_labels + self.T(x_key.unsqueeze(1) - context_keys)), dim=1)
+        
+        # Combine with input encoding
+        combined = x_encoded + context_vector
+        
         return combined
 
 # Example usage
